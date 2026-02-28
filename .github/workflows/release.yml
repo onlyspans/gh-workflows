@@ -1,0 +1,133 @@
+on:
+  workflow_call:
+    inputs:
+      image_name:
+        required: true
+        type: string
+      helm_release:
+        required: true
+        type: string
+      kube_namespace:
+        required: true
+        type: string
+      registry:
+        required: true
+        type: string
+      image_pull_secret:
+        required: true
+        type: string
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    name: Generate version
+    timeout-minutes: 2
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Generate release number
+        id: version
+        run: |
+          COMMIT_COUNT=$(git rev-list --count HEAD)
+          VERSION="1.0.${COMMIT_COUNT}"
+          echo "version=${VERSION}" >> $GITHUB_OUTPUT
+          echo "Release version: ${VERSION}"
+
+  build:
+    runs-on: ubuntu-latest
+    name: Build and push image
+    timeout-minutes: 15
+    needs: version
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Docker Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ inputs.registry }}
+          username: ${{ secrets.DOCKER_REGISTRY_USERNAME }}
+          password: ${{ secrets.DOCKER_REGISTRY_TOKEN }}
+
+      - name: Build and push Docker image
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ inputs.registry }}/${{ inputs.image_name }}:${{ needs.version.outputs.version }}
+            ${{ inputs.registry }}/${{ inputs.image_name }}:latest
+          cache-from: type=registry,ref=${{ inputs.registry }}/${{ inputs.image_name }}:buildcache
+          cache-to: type=registry,ref=${{ inputs.registry }}/${{ inputs.image_name }}:buildcache,mode=max
+
+  deploy:
+    runs-on: ubuntu-latest
+    name: Deploy to Kubernetes
+    timeout-minutes: 10
+    needs: [version, build]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Helm
+        uses: azure/setup-helm@v4
+
+      - name: Configure kubectl
+        run: |
+          echo "${{ secrets.KUBECONFIG }}" | base64 -d > /tmp/kubeconfig.yaml
+          echo "KUBECONFIG=/tmp/kubeconfig.yaml" >> $GITHUB_ENV
+
+      - name: Load service env vars
+        env:
+          HELM_ENV: ${{ secrets.HELM_ENV }}
+        run: |
+          if [ -n "$HELM_ENV" ]; then
+            echo "$HELM_ENV" >> $GITHUB_ENV
+          fi
+
+      - name: Deploy with Helm
+        env:
+          IMAGE_TAG: ${{ needs.version.outputs.version }}
+          IMAGE_PULL_SECRET: ${{ inputs.image_pull_secret }}
+        run: |
+          envsubst < ./helm/ci-values.yaml | helm upgrade --install ${{ inputs.helm_release }} ./helm \
+            --namespace ${{ inputs.kube_namespace }} \
+            --create-namespace \
+            -f - \
+            --wait \
+            --timeout 5m
+
+  release:
+    runs-on: ubuntu-latest
+    name: Create GitHub Release
+    timeout-minutes: 2
+    needs: [version, deploy]
+    permissions:
+      contents: write
+    steps:
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ needs.version.outputs.version }}
+          name: Release ${{ needs.version.outputs.version }}
+          body: |
+            ## Release ${{ needs.version.outputs.version }}
+
+            ### Docker Image
+            `${{ inputs.registry }}/${{ inputs.image_name }}:${{ needs.version.outputs.version }}`
+
+            ### Commit
+            ${{ github.sha }}
+
+            ### Triggered by
+            @${{ github.actor }}
+          draft: false
+          prerelease: false
