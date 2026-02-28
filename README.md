@@ -4,11 +4,6 @@ Shared GitHub Actions workflows for onlyspans services.
 
 ## release.yml
 
-Builds a Docker image, deploys to Kubernetes via Helm, creates a GitHub Release.
-
-**Required org-level variables:** `REGISTRY`, `IMAGE_PULL_SECRET`
-**Required secrets:** `DOCKER_REGISTRY_USERNAME`, `DOCKER_REGISTRY_TOKEN`, `KUBECONFIG`
-
 ### Usage
 
 ```yaml
