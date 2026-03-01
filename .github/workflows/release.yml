@@ -10,6 +10,14 @@ on:
       kube_namespace:
         required: true
         type: string
+      helm_dir:
+        required: false
+        type: string
+        default: ./helm
+      dockerfile:
+        required: false
+        type: string
+        default: Dockerfile
 
 jobs:
   version:
@@ -55,6 +63,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
+          file: ${{ inputs.dockerfile }}
           push: true
           tags: |
             ${{ vars.REGISTRY }}/${{ inputs.image_name }}:${{ needs.version.outputs.version }}
@@ -92,7 +101,7 @@ jobs:
           IMAGE_TAG: ${{ needs.version.outputs.version }}
           IMAGE_PULL_SECRET: ${{ vars.IMAGE_PULL_SECRET }}
         run: |
-          envsubst < ./helm/ci-values.yaml | helm upgrade --install ${{ inputs.helm_release }} ./helm \
+          envsubst < ${{ inputs.helm_dir }}/ci-values.yaml | helm upgrade --install ${{ inputs.helm_release }} ${{ inputs.helm_dir }} \
             --namespace ${{ inputs.kube_namespace }} \
             --create-namespace \
             -f - \
