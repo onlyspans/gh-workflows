@@ -18,6 +18,10 @@ on:
         required: false
         type: string
         default: Dockerfile
+      extra_build_args:
+        required: false
+        type: string
+        default: ""
 
 jobs:
   version:
@@ -65,6 +69,7 @@ jobs:
           context: .
           file: ${{ inputs.dockerfile }}
           push: true
+          build-args: ${{ inputs.extra_build_args }}
           tags: |
             ${{ vars.REGISTRY }}/${{ inputs.image_name }}:${{ needs.version.outputs.version }}
             ${{ vars.REGISTRY }}/${{ inputs.image_name }}:latest
